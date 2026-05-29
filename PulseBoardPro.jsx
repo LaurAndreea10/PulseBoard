@@ -1,0 +1,704 @@
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, RadialBarChart, RadialBar, Cell,
+  ReferenceDot, Line, ComposedChart,
+} from "recharts";
+import {
+  TrendingUp, TrendingDown, Sparkles, Loader2, Activity, Users,
+  ShoppingBag, RefreshCw, Globe, Zap, AlertCircle, Upload, Link2,
+  Download, GitCompare, CheckCircle2, FileText, X, ArrowRight,
+} from "lucide-react";
+
+/* ============================================================
+   PulseBoard PRO — Revenue & Ops Intelligence
+   CSV/Sheet import · AI briefing with actions · anomaly detection
+   · period comparison · export. Bilingual RO/EN. Dark editorial.
+   ============================================================ */
+
+const COPY = {
+  ro: {
+    badge: "Demo live",
+    badgeReal: "Datele tale",
+    title: "PulseBoard",
+    subtitle: "Inteligență de venituri & operațiuni",
+    tagline:
+      "Conectează-ți datele și obține într-o privire ce contează — plus un briefing scris de AI cu acțiuni concrete.",
+    last7: "7 zile", last30: "30 zile", last90: "Trimestru",
+    refresh: "Date noi (demo)",
+    importData: "Importă date",
+    kpiRevenue: "Venit total", kpiOrders: "Comenzi",
+    kpiCustomers: "Clienți noi", kpiConversion: "Rată conversie",
+    vsPrev: "vs. perioada anterioară",
+    revenueTrend: "Evoluția veniturilor", channels: "Venituri pe canal",
+    health: "Sănătatea operațiunilor",
+    briefingTitle: "Briefing executiv", briefingSub: "Generat de AI din datele de mai sus",
+    generate: "Generează briefing", regenerate: "Regenerează",
+    generating: "Analizez datele…",
+    actionsTitle: "Acțiuni recomandate",
+    aiOffline: "Mod offline — briefing din motorul local. Conectează API-ul pentru analiză AI completă.",
+    channelDirect: "Direct", channelOrganic: "Organic", channelPaid: "Plătit",
+    channelSocial: "Social", channelEmail: "Email",
+    healthUptime: "Uptime", healthSpeed: "Viteză", healthSatisfaction: "Satisfacție",
+    footer: "Construit ca piesă de portofoliu.",
+    compare: "Compară perioade", comparing: "Comparație activă",
+    exportBtn: "Export",
+    importTitle: "Importă-ți datele",
+    importDesc: "Încarcă un CSV sau lipește linkul unui Google Sheet public. Coloane așteptate: dată, venit, comenzi (opțional: clienți, vizite).",
+    dropCsv: "Trage un CSV aici sau click pentru a încărca",
+    orPaste: "sau lipește un link Google Sheet (publicat ca CSV)",
+    sheetPlaceholder: "https://docs.google.com/.../pub?output=csv",
+    loadSheet: "Încarcă", useDemo: "Folosește datele demo",
+    parseError: "Nu am putut citi datele. Verifică formatul (CSV cu coloane dată/venit).",
+    rowsLoaded: (n) => `${n} rânduri încărcate din datele tale`,
+    anomaly: "Anomalie detectată",
+    anomalyNote: (n) => `${n} ${n === 1 ? "anomalie detectată" : "anomalii detectate"}`,
+    prevPeriod: "Perioada anterioară", currPeriod: "Perioada curentă",
+    close: "Închide",
+  },
+  en: {
+    badge: "Live demo",
+    badgeReal: "Your data",
+    title: "PulseBoard",
+    subtitle: "Revenue & Ops Intelligence",
+    tagline:
+      "Plug in your data and see what matters at a glance — plus an AI-written briefing with concrete actions.",
+    last7: "7 days", last30: "30 days", last90: "Quarter",
+    refresh: "New data (demo)",
+    importData: "Import data",
+    kpiRevenue: "Total revenue", kpiOrders: "Orders",
+    kpiCustomers: "New customers", kpiConversion: "Conversion rate",
+    vsPrev: "vs. previous period",
+    revenueTrend: "Revenue trend", channels: "Revenue by channel",
+    health: "Operations health",
+    briefingTitle: "Executive briefing", briefingSub: "AI-generated from the data above",
+    generate: "Generate briefing", regenerate: "Regenerate",
+    generating: "Analyzing the data…",
+    actionsTitle: "Recommended actions",
+    aiOffline: "Offline mode — briefing from the local engine. Connect the API for full AI analysis.",
+    channelDirect: "Direct", channelOrganic: "Organic", channelPaid: "Paid",
+    channelSocial: "Social", channelEmail: "Email",
+    healthUptime: "Uptime", healthSpeed: "Speed", healthSatisfaction: "Satisfaction",
+    footer: "Built as a portfolio piece.",
+    compare: "Compare periods", comparing: "Comparison on",
+    exportBtn: "Export",
+    importTitle: "Import your data",
+    importDesc: "Upload a CSV or paste a public Google Sheet link. Expected columns: date, revenue, orders (optional: customers, visits).",
+    dropCsv: "Drop a CSV here or click to upload",
+    orPaste: "or paste a Google Sheet link (published as CSV)",
+    sheetPlaceholder: "https://docs.google.com/.../pub?output=csv",
+    loadSheet: "Load", useDemo: "Use demo data",
+    parseError: "Couldn't read the data. Check the format (CSV with date/revenue columns).",
+    rowsLoaded: (n) => `${n} rows loaded from your data`,
+    anomaly: "Anomaly detected",
+    anomalyNote: (n) => `${n} ${n === 1 ? "anomaly detected" : "anomalies detected"}`,
+    prevPeriod: "Previous period", currPeriod: "Current period",
+    close: "Close",
+  },
+};
+
+/* ---------- seeded RNG ---------- */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function buildDataset(days, seed) {
+  const rnd = mulberry32(seed);
+  const series = [];
+  let base = 4200 + rnd() * 1500;
+  for (let i = 0; i < days; i++) {
+    const weekday = i % 7;
+    const weekendDip = weekday === 0 || weekday === 6 ? 0.78 : 1;
+    const drift = 1 + (i / days) * 0.35;
+    const noise = 0.82 + rnd() * 0.4;
+    let rev = Math.round(base * weekendDip * drift * noise);
+    // inject 1-2 anomalies for demo realism
+    if (days >= 14 && (i === Math.floor(days * 0.4))) rev = Math.round(rev * 0.55);
+    if (days >= 14 && (i === Math.floor(days * 0.75))) rev = Math.round(rev * 1.6);
+    const orders = Math.round(rev / (58 + rnd() * 22));
+    series.push({
+      label: `${i + 1}`,
+      revenue: rev,
+      orders,
+      customers: Math.round(orders * (0.32 + rnd() * 0.18)),
+      visits: Math.round(orders / (0.018 + rnd() * 0.02)),
+    });
+  }
+  return { series, source: "demo" };
+}
+
+/* ---------- channel derivation (works for any series) ---------- */
+function deriveChannels(series, seed) {
+  const rnd = mulberry32(seed + 99);
+  const total = series.reduce((s, d) => s + d.revenue, 0);
+  const keys = ["channelOrganic", "channelPaid", "channelDirect", "channelSocial", "channelEmail"];
+  const weights = [0.34, 0.27, 0.18, 0.12, 0.09];
+  return keys.map((key, idx) => ({
+    key, value: Math.round(total * weights[idx] * (0.9 + rnd() * 0.2)),
+  }));
+}
+
+/* ---------- anomaly detection (z-score on revenue) ---------- */
+function detectAnomalies(series) {
+  if (series.length < 5) return [];
+  const vals = series.map((d) => d.revenue);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+  if (sd === 0) return [];
+  const out = [];
+  series.forEach((d, i) => {
+    const z = (d.revenue - mean) / sd;
+    if (Math.abs(z) >= 1.9) out.push({ index: i, label: d.label, revenue: d.revenue, dir: z > 0 ? "spike" : "drop", z });
+  });
+  return out;
+}
+
+/* ---------- CSV parser ---------- */
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) throw new Error("empty");
+  const delim = lines[0].includes("\t") ? "\t" : ",";
+  const headers = lines[0].split(delim).map((h) => h.trim().toLowerCase());
+  const find = (cands) => headers.findIndex((h) => cands.some((c) => h.includes(c)));
+  const di = find(["date", "dat", "zi", "day"]);
+  const ri = find(["revenue", "venit", "sales", "amount", "total", "incasari"]);
+  const oi = find(["order", "comenzi", "comand", "qty", "count"]);
+  const ci = find(["customer", "client", "user"]);
+  const vi = find(["visit", "vizite", "session", "traffic"]);
+  if (ri === -1) throw new Error("no revenue column");
+  const num = (s) => {
+    const n = parseFloat(String(s).replace(/[^0-9.\-]/g, ""));
+    return isNaN(n) ? 0 : n;
+  };
+  const series = lines.slice(1).map((line, idx) => {
+    const cells = line.split(delim);
+    const revenue = Math.round(num(cells[ri]));
+    const orders = oi !== -1 ? Math.round(num(cells[oi])) : Math.max(1, Math.round(revenue / 70));
+    return {
+      label: di !== -1 ? String(cells[di]).trim().slice(0, 10) : `${idx + 1}`,
+      revenue,
+      orders,
+      customers: ci !== -1 ? Math.round(num(cells[ci])) : Math.round(orders * 0.4),
+      visits: vi !== -1 ? Math.round(num(cells[vi])) : Math.round(orders / 0.025),
+    };
+  }).filter((d) => d.revenue > 0);
+  if (!series.length) throw new Error("no rows");
+  return series;
+}
+
+function pctChange(curr, prev) {
+  if (!prev) return 0;
+  return ((curr - prev) / prev) * 100;
+}
+const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n));
+const money = (n) => "$" + Math.round(n).toLocaleString("en-US");
+
+/* ---------- local fallback briefing with actions ---------- */
+function localBriefing(m, lang, anomalies, t) {
+  const ro = lang === "ro";
+  const summary = ro
+    ? `Veniturile totale au atins ${money(m.total)}, ${m.revChange >= 0 ? "în creștere" : "în scădere"} cu ${Math.abs(m.revChange).toFixed(1)}% față de intervalul anterior. Tendința este ${m.trendWord}, cu o rată de conversie de ${m.convRate.toFixed(2)}% și „${m.topChannel}” drept canal principal.${anomalies.length ? ` Am identificat ${anomalies.length} ${anomalies.length === 1 ? "zi neobișnuită" : "zile neobișnuite"} în date.` : ""}`
+    : `Total revenue reached ${money(m.total)}, ${m.revChange >= 0 ? "up" : "down"} ${Math.abs(m.revChange).toFixed(1)}% versus the prior interval. The trend is ${m.trendWord}, with a ${m.convRate.toFixed(2)}% conversion rate and "${m.topChannel}" as the leading channel.${anomalies.length ? ` I flagged ${anomalies.length} unusual ${anomalies.length === 1 ? "day" : "days"} in the data.` : ""}`;
+  const actions = ro
+    ? [
+        `Concentrează bugetul pe „${m.topChannel}”, canalul cu cel mai mare aport.`,
+        m.revChange < 0 ? "Investighează scăderea de venit și testează o ofertă de recuperare." : "Replică ce a funcționat în perioada de creștere pe canalele slabe.",
+        anomalies.length ? "Verifică zilele marcate ca anomalii — pot ascunde o problemă tehnică sau o oportunitate." : "Crește rata de conversie cu un test A/B pe pagina principală.",
+      ]
+    : [
+        `Concentrate budget on "${m.topChannel}", the highest-contributing channel.`,
+        m.revChange < 0 ? "Investigate the revenue dip and test a recovery offer." : "Replicate what worked during the growth window on weaker channels.",
+        anomalies.length ? "Check the flagged anomaly days — they may hide a technical issue or an opportunity." : "Lift conversion with an A/B test on the main landing page.",
+      ];
+  return { summary, actions };
+}
+
+export default function PulseBoardPro() {
+  const [lang, setLang] = useState("ro");
+  const [range, setRange] = useState(30);
+  const [seed, setSeed] = useState(7);
+  const [briefing, setBriefing] = useState("");
+  const [actions, setActions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const [animKey, setAnimKey] = useState(0);
+  const [compare, setCompare] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importErr, setImportErr] = useState("");
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [sheetLoading, setSheetLoading] = useState(false);
+  const [userData, setUserData] = useState(null); // {series} when imported
+  const fileRef = useRef(null);
+  const dashRef = useRef(null);
+  const t = COPY[lang];
+
+  const dataset = useMemo(() => {
+    if (userData) return { series: userData.series, source: "user" };
+    return buildDataset(range, seed);
+  }, [userData, range, seed]);
+
+  const series = dataset.series;
+  const isUser = dataset.source === "user";
+  const channels = useMemo(() => deriveChannels(series, seed), [series, seed]);
+  const anomalies = useMemo(() => detectAnomalies(series), [series]);
+
+  const metrics = useMemo(() => {
+    const half = Math.floor(series.length / 2);
+    const prev = series.slice(0, half);
+    const curr = series.slice(half);
+    const sum = (arr, k) => arr.reduce((s, d) => s + d[k], 0);
+    const currRev = sum(curr, "revenue"), prevRev = sum(prev, "revenue");
+    const currOrd = sum(curr, "orders"), prevOrd = sum(prev, "orders");
+    const totalOrders = sum(series, "orders");
+    const totalCust = sum(series, "customers");
+    const totalVisits = sum(series, "visits");
+    const total = sum(series, "revenue");
+    const convRate = totalVisits ? (totalOrders / totalVisits) * 100 : 0;
+    const revChange = pctChange(currRev, prevRev);
+    const ordChange = pctChange(currOrd, prevOrd);
+    const topCh = [...channels].sort((a, b) => b.value - a.value)[0];
+    const trendWord =
+      revChange > 8 ? (lang === "ro" ? "puternic ascendentă" : "strongly positive")
+      : revChange > 0 ? (lang === "ro" ? "ușor ascendentă" : "mildly positive")
+      : (lang === "ro" ? "descendentă" : "negative");
+    return {
+      total, totalOrders, totalCust, convRate, revChange, ordChange,
+      custChange: ordChange * 0.9, convChange: revChange * 0.4,
+      topChannel: t[topCh.key], trendWord,
+    };
+  }, [series, channels, lang, t]);
+
+  // chart data with comparison overlay
+  const chartData = useMemo(() => {
+    const half = Math.floor(series.length / 2);
+    return series.map((d, i) => {
+      const row = { label: d.label, revenue: d.revenue };
+      if (compare && series.length >= 4) {
+        const mirror = series[i % half];
+        row.prev = mirror ? mirror.revenue : null;
+      }
+      return row;
+    });
+  }, [series, compare]);
+
+  const channelData = useMemo(
+    () => channels.map((c) => ({ name: t[c.key], value: c.value })),
+    [channels, t]
+  );
+
+  const health = useMemo(() => {
+    const rnd = mulberry32(seed * 13);
+    return [
+      { name: t.healthUptime, value: 99.2 + rnd() * 0.7, fill: "#4ade80" },
+      { name: t.healthSpeed, value: 86 + rnd() * 10, fill: "#fbbf24" },
+      { name: t.healthSatisfaction, value: 91 + rnd() * 7, fill: "#60a5fa" },
+    ].map((h) => ({ ...h, value: Math.round(h.value * 10) / 10 }));
+  }, [seed, t]);
+
+  async function generateBriefing() {
+    setLoading(true); setBriefing(""); setActions([]);
+    const payload = {
+      total: Math.round(metrics.total),
+      revenueChangePct: +metrics.revChange.toFixed(1),
+      ordersChangePct: +metrics.ordChange.toFixed(1),
+      conversionRatePct: +metrics.convRate.toFixed(2),
+      topChannel: metrics.topChannel,
+      periods: series.length,
+      anomalies: anomalies.map((a) => ({ day: a.label, type: a.dir })),
+      dataSource: isUser ? "user-imported" : "demo",
+    };
+    const sys = lang === "ro"
+      ? `Ești analist de business. Pe baza metricilor, răspunde STRICT cu un obiect JSON, fără markdown, fără text în plus, cu forma: {"summary":"3 propoziții de briefing executiv în română","actions":["acțiune 1","acțiune 2","acțiune 3"]}. Acțiunile să fie scurte, concrete, prioritizate. Metrici: ${JSON.stringify(payload)}`
+      : `You are a business analyst. Based on the metrics, respond STRICTLY with a JSON object, no markdown, no extra text, shaped as: {"summary":"3-sentence executive briefing in English","actions":["action 1","action 2","action 3"]}. Actions must be short, concrete, prioritized. Metrics: ${JSON.stringify(payload)}`;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{ role: "user", content: sys }],
+        }),
+      });
+      if (!res.ok) throw new Error("api");
+      const json = await res.json();
+      let text = json.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+      text = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(text);
+      if (!parsed.summary) throw new Error("shape");
+      setOffline(false);
+      setActions(parsed.actions || []);
+      typeOut(parsed.summary);
+    } catch (e) {
+      setOffline(true);
+      const lb = localBriefing(metrics, lang, anomalies, t);
+      setActions(lb.actions);
+      typeOut(lb.summary);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function typeOut(text) {
+    let i = 0; setBriefing("");
+    const id = setInterval(() => {
+      i += 3; setBriefing(text.slice(0, i));
+      if (i >= text.length) clearInterval(id);
+    }, 12);
+  }
+
+  useEffect(() => { setBriefing(""); setActions([]); }, [range, seed, lang, userData]);
+
+  /* ---------- import handlers ---------- */
+  function handleFile(file) {
+    setImportErr("");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const s = parseCSV(e.target.result);
+        setUserData({ series: s });
+        setShowImport(false);
+        setAnimKey((k) => k + 1);
+      } catch (err) {
+        setImportErr(t.parseError);
+      }
+    };
+    reader.onerror = () => setImportErr(t.parseError);
+    reader.readAsText(file);
+  }
+
+  async function loadSheet() {
+    setImportErr(""); setSheetLoading(true);
+    try {
+      let url = sheetUrl.trim();
+      // best-effort: turn a normal sheet URL into a CSV export
+      if (url.includes("/edit")) {
+        url = url.replace(/\/edit.*$/, "/export?format=csv");
+      }
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("fetch");
+      const text = await res.text();
+      const s = parseCSV(text);
+      setUserData({ series: s });
+      setShowImport(false);
+      setAnimKey((k) => k + 1);
+    } catch (err) {
+      setImportErr(t.parseError);
+    } finally {
+      setSheetLoading(false);
+    }
+  }
+
+  function exportBriefing() {
+    const lines = [
+      `PulseBoard — ${t.briefingTitle}`,
+      `${new Date().toLocaleDateString()}`,
+      "",
+      `${t.kpiRevenue}: ${money(metrics.total)} (${metrics.revChange >= 0 ? "+" : ""}${metrics.revChange.toFixed(1)}%)`,
+      `${t.kpiOrders}: ${metrics.totalOrders} (${metrics.ordChange >= 0 ? "+" : ""}${metrics.ordChange.toFixed(1)}%)`,
+      `${t.kpiConversion}: ${metrics.convRate.toFixed(2)}%`,
+      "",
+      briefing || "—",
+      "",
+      `${t.actionsTitle}:`,
+      ...actions.map((a, i) => `${i + 1}. ${a}`),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pulseboard-briefing.txt";
+    a.click();
+  }
+
+  const kpis = [
+    { label: t.kpiRevenue, value: money(metrics.total), change: metrics.revChange, icon: Activity, accent: "#e8b84b" },
+    { label: t.kpiOrders, value: metrics.totalOrders.toLocaleString(), change: metrics.ordChange, icon: ShoppingBag, accent: "#60a5fa" },
+    { label: t.kpiCustomers, value: metrics.totalCust.toLocaleString(), change: metrics.custChange, icon: Users, accent: "#4ade80" },
+    { label: t.kpiConversion, value: metrics.convRate.toFixed(2) + "%", change: metrics.convChange, icon: Zap, accent: "#c084fc" },
+  ];
+
+  const anomalyByLabel = useMemo(() => {
+    const map = {};
+    anomalies.forEach((a) => { map[a.label] = a; });
+    return map;
+  }, [anomalies]);
+
+  return (
+    <div ref={dashRef} style={{
+      minHeight: "100vh",
+      background: "radial-gradient(1200px 600px at 80% -10%, #1a1d2e 0%, transparent 60%), radial-gradient(900px 500px at -10% 110%, #15171f 0%, transparent 55%), #0a0b10",
+      color: "#e6e7ec", fontFamily: "'Inter Tight', system-ui, sans-serif",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+        * { box-sizing: border-box; }
+        ::selection { background:#e8b84b; color:#0a0b10; }
+        @keyframes rise { from { opacity:0; transform:translateY(16px);} to {opacity:1; transform:translateY(0);} }
+        .rise { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+        .grain:before {
+          content:""; position:fixed; inset:0; pointer-events:none; z-index:1; opacity:.5;
+          background-image:
+            repeating-radial-gradient(rgba(255,255,255,.012) 0 1px, transparent 1px 3px),
+            repeating-radial-gradient(rgba(0,0,0,.02) 0 1px, transparent 1px 4px);
+          background-size: 3px 3px, 4px 4px;
+        }
+        .card { background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015)); border:1px solid rgba(255,255,255,.07); border-radius:18px; }
+        .pill { transition:all .2s ease; }
+        .pill:hover { background:rgba(255,255,255,.08); }
+        .glow { box-shadow:0 0 0 1px rgba(232,184,75,.25), 0 12px 40px -12px rgba(232,184,75,.25); }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .act { animation: rise .4s ease both; }
+        @media (max-width: 880px) {
+          .grid2, .grid3 { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+
+      <div className="grain" />
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "clamp(24px,4vw,52px) clamp(18px,3vw,40px)", position: "relative", zIndex: 2 }}>
+
+        {/* header */}
+        <header className="rise" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 20, marginBottom: 34 }}>
+          <div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, letterSpacing: ".08em", textTransform: "uppercase", color: isUser ? "#4ade80" : "#e8b84b", fontFamily: "'JetBrains Mono', monospace", background: isUser ? "rgba(74,222,128,.08)" : "rgba(232,184,75,.08)", border: `1px solid ${isUser ? "rgba(74,222,128,.25)" : "rgba(232,184,75,.2)"}`, padding: "5px 11px", borderRadius: 99, marginBottom: 16 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: "#4ade80", boxShadow: "0 0 8px #4ade80" }} />
+              {isUser ? t.badgeReal : t.badge}
+            </div>
+            <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: "clamp(38px,6vw,64px)", lineHeight: 0.98, margin: 0, fontWeight: 600, letterSpacing: "-0.02em" }}>
+              {t.title}<span style={{ color: "#e8b84b" }}>.</span>
+            </h1>
+            <p style={{ fontSize: 15, color: "#9aa0ad", margin: "10px 0 0", maxWidth: 500, lineHeight: 1.5 }}>
+              <span style={{ color: "#c9cdd6", fontWeight: 500 }}>{t.subtitle}.</span> {t.tagline}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => setLang(lang === "ro" ? "en" : "ro")} className="pill" style={btn}>
+              <Globe size={15} /> {lang === "ro" ? "RO" : "EN"}
+            </button>
+            <button onClick={() => setShowImport(true)} className="pill glow" style={{ ...btn, background: "rgba(232,184,75,.12)", borderColor: "rgba(232,184,75,.3)", color: "#e8b84b" }}>
+              <Upload size={15} /> {t.importData}
+            </button>
+          </div>
+        </header>
+
+        {/* controls row */}
+        <div className="rise" style={{ display: "flex", gap: 8, marginBottom: 22, flexWrap: "wrap", alignItems: "center", animationDelay: ".05s" }}>
+          {!isUser && [[7, t.last7], [30, t.last30], [90, t.last90]].map(([d, label]) => (
+            <button key={d} onClick={() => setRange(d)} style={{ ...segBtn, background: range === d ? "#e8b84b" : "rgba(255,255,255,.04)", color: range === d ? "#0a0b10" : "#9aa0ad", borderColor: range === d ? "#e8b84b" : "rgba(255,255,255,.08)" }}>
+              {label}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setCompare((c) => !c)} style={{ ...segBtn, background: compare ? "rgba(96,165,250,.15)" : "rgba(255,255,255,.04)", color: compare ? "#60a5fa" : "#9aa0ad", borderColor: compare ? "rgba(96,165,250,.35)" : "rgba(255,255,255,.08)", display: "flex", alignItems: "center", gap: 6 }}>
+            <GitCompare size={14} /> {compare ? t.comparing : t.compare}
+          </button>
+          {!isUser && (
+            <button onClick={() => { setSeed((s) => s + 1); setAnimKey((k) => k + 1); }} className="pill" style={{ ...segBtn, display: "flex", alignItems: "center", gap: 6 }}>
+              <RefreshCw size={14} /> {t.refresh}
+            </button>
+          )}
+          {isUser && (
+            <button onClick={() => { setUserData(null); setAnimKey((k) => k + 1); }} className="pill" style={{ ...segBtn, display: "flex", alignItems: "center", gap: 6 }}>
+              <X size={14} /> {t.useDemo}
+            </button>
+          )}
+        </div>
+
+        {anomalies.length > 0 && (
+          <div className="rise" style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "#fbbf24", background: "rgba(251,191,36,.07)", border: "1px solid rgba(251,191,36,.2)", padding: "6px 12px", borderRadius: 99, marginBottom: 18, fontFamily: "'JetBrains Mono', monospace" }}>
+            <AlertCircle size={14} /> {t.anomalyNote(anomalies.length)}
+          </div>
+        )}
+
+        {/* KPI grid */}
+        <div className="grid3" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16, marginBottom: 20 }}>
+          {kpis.map((k, i) => {
+            const up = k.change >= 0; const Icon = k.icon;
+            return (
+              <div key={k.label + animKey} className="card rise" style={{ padding: 20, animationDelay: `${0.08 + i * 0.06}s` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <span style={{ fontSize: 13, color: "#9aa0ad", fontWeight: 500 }}>{k.label}</span>
+                  <div style={{ width: 32, height: 32, borderRadius: 9, display: "grid", placeItems: "center", background: k.accent + "1a", color: k.accent }}>
+                    <Icon size={16} />
+                  </div>
+                </div>
+                <div style={{ fontFamily: "'Fraunces', serif", fontSize: 30, fontWeight: 600, letterSpacing: "-.02em", marginBottom: 8 }}>{k.value}</div>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600, color: up ? "#4ade80" : "#f87171", fontFamily: "'JetBrains Mono', monospace" }}>
+                  {up ? <TrendingUp size={13} /> : <TrendingDown size={13} />}{up ? "+" : ""}{k.change.toFixed(1)}%
+                  <span style={{ color: "#6b7180", fontWeight: 400, marginLeft: 4 }}>{t.vsPrev}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* charts row */}
+        <div className="grid2" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16, marginBottom: 20 }}>
+          <div className="card rise" style={{ padding: 22, animationDelay: ".3s" }}>
+            <h3 style={sectionTitle}>{t.revenueTrend}</h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart key={animKey} data={chartData} margin={{ left: -18, right: 6, top: 8 }}>
+                <defs>
+                  <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#e8b84b" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="#e8b84b" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.05)" />
+                <XAxis dataKey="label" tick={{ fill: "#6b7180", fontSize: 11 }} tickLine={false} axisLine={false} interval={Math.max(0, Math.floor(series.length / 7))} />
+                <YAxis tick={{ fill: "#6b7180", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={fmt} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => [money(v), n === "prev" ? t.prevPeriod : t.currPeriod]} labelFormatter={() => ""} />
+                {compare && <Line type="monotone" dataKey="prev" stroke="#60a5fa" strokeWidth={1.8} strokeDasharray="4 4" dot={false} />}
+                <Area type="monotone" dataKey="revenue" stroke="#e8b84b" strokeWidth={2.4} fill="url(#rev)" />
+                {anomalies.map((a) => (
+                  <ReferenceDot key={a.label} x={a.label} y={a.revenue} r={5} fill={a.dir === "drop" ? "#f87171" : "#4ade80"} stroke="#0a0b10" strokeWidth={2} />
+                ))}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="card rise" style={{ padding: 22, animationDelay: ".36s" }}>
+            <h3 style={sectionTitle}>{t.channels}</h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart key={animKey} data={channelData} layout="vertical" margin={{ left: 4, right: 16 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" tick={{ fill: "#9aa0ad", fontSize: 12 }} tickLine={false} axisLine={false} width={66} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [money(v), ""]} cursor={{ fill: "rgba(255,255,255,.03)" }} />
+                <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={18}>
+                  {channelData.map((_, i) => (
+                    <Cell key={i} fill={["#e8b84b", "#60a5fa", "#4ade80", "#c084fc", "#f472b6"][i]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* health + AI briefing */}
+        <div className="grid2" style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 16 }}>
+          <div className="card rise" style={{ padding: 22, animationDelay: ".42s" }}>
+            <h3 style={sectionTitle}>{t.health}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RadialBarChart key={animKey} innerRadius="35%" outerRadius="100%" data={health} startAngle={90} endAngle={-270}>
+                <RadialBar background={{ fill: "rgba(255,255,255,.05)" }} dataKey="value" cornerRadius={8} />
+              </RadialBarChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+              {health.map((h) => (
+                <div key={h.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 7, color: "#9aa0ad" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 99, background: h.fill }} />{h.name}
+                  </span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{h.value}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card rise" style={{ padding: 24, animationDelay: ".48s", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: -60, right: -40, width: 200, height: 200, background: "radial-gradient(circle, rgba(232,184,75,.14), transparent 70%)", pointerEvents: "none" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <h3 style={{ ...sectionTitle, marginBottom: 2, display: "flex", alignItems: "center", gap: 8 }}>
+                  <Sparkles size={17} color="#e8b84b" />{t.briefingTitle}
+                </h3>
+                <span style={{ fontSize: 12, color: "#6b7180" }}>{t.briefingSub}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(briefing && !loading) && (
+                  <button onClick={exportBriefing} className="pill" style={{ ...btn, padding: "9px 13px" }}>
+                    <Download size={14} /> {t.exportBtn}
+                  </button>
+                )}
+                <button onClick={generateBriefing} disabled={loading} className={briefing ? "" : "glow"} style={{ display: "flex", alignItems: "center", gap: 7, background: loading ? "rgba(232,184,75,.3)" : "#e8b84b", color: "#0a0b10", border: "none", padding: "9px 15px", borderRadius: 10, cursor: loading ? "default" : "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                  {loading ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
+                  {loading ? t.generating : briefing ? t.regenerate : t.generate}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 18, fontSize: 15.5, lineHeight: 1.65, color: briefing ? "#dfe2e8" : "#5b6070", fontFamily: "'Fraunces', serif", fontWeight: 400, minHeight: 90 }}>
+              {briefing || (
+                <span style={{ fontStyle: "italic" }}>
+                  {lang === "ro" ? "Apasă „Generează briefing” pentru ca AI-ul să citească datele și să-ți spună ce contează." : "Hit “Generate briefing” to have AI read the data and tell you what matters."}
+                </span>
+              )}
+              {briefing && <span style={{ opacity: loading ? 1 : 0 }}>▋</span>}
+            </div>
+
+            {actions.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "#e8b84b", fontFamily: "'JetBrains Mono', monospace", marginBottom: 10 }}>{t.actionsTitle}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {actions.slice(0, 3).map((a, i) => (
+                    <div key={i} className="act" style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, color: "#c9cdd6", animationDelay: `${i * 0.08}s`, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 10, padding: "10px 12px" }}>
+                      <CheckCircle2 size={16} style={{ color: "#4ade80", flexShrink: 0, marginTop: 1 }} />
+                      <span>{a}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {offline && briefing && (
+              <div style={{ marginTop: 16, display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: "#9aa0ad", background: "rgba(251,191,36,.06)", border: "1px solid rgba(251,191,36,.18)", borderRadius: 10, padding: "10px 12px" }}>
+                <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1, color: "#fbbf24" }} />{t.aiOffline}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <footer style={{ marginTop: 30, textAlign: "center", fontSize: 12, color: "#4b5060", fontFamily: "'JetBrains Mono', monospace" }}>{t.footer}</footer>
+      </div>
+
+      {/* import modal */}
+      {showImport && (
+        <div onClick={() => setShowImport(false)} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(5,6,10,.7)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} className="card" style={{ maxWidth: 520, width: "100%", padding: 28, background: "#111319", animation: "rise .35s ease both" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: 24, margin: 0, fontWeight: 600 }}>{t.importTitle}</h3>
+              <button onClick={() => setShowImport(false)} style={{ background: "none", border: "none", color: "#9aa0ad", cursor: "pointer" }}><X size={20} /></button>
+            </div>
+            <p style={{ fontSize: 13.5, color: "#9aa0ad", lineHeight: 1.5, margin: "0 0 20px" }}>{t.importDesc}</p>
+
+            <div onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
+              style={{ border: "1.5px dashed rgba(255,255,255,.18)", borderRadius: 14, padding: "28px 20px", textAlign: "center", cursor: "pointer", marginBottom: 18, transition: "all .2s" }}>
+              <FileText size={26} style={{ color: "#e8b84b", marginBottom: 10 }} />
+              <div style={{ fontSize: 14, color: "#c9cdd6" }}>{t.dropCsv}</div>
+              <input ref={fileRef} type="file" accept=".csv,.tsv,text/csv" style={{ display: "none" }} onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])} />
+            </div>
+
+            <div style={{ fontSize: 12, color: "#6b7180", textAlign: "center", marginBottom: 12 }}>{t.orPaste}</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, padding: "0 12px" }}>
+                <Link2 size={15} color="#6b7180" />
+                <input value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder={t.sheetPlaceholder} style={{ flex: 1, background: "none", border: "none", outline: "none", color: "#e6e7ec", fontSize: 13, padding: "11px 0", fontFamily: "inherit" }} />
+              </div>
+              <button onClick={loadSheet} disabled={sheetLoading || !sheetUrl.trim()} style={{ background: "#e8b84b", color: "#0a0b10", border: "none", borderRadius: 10, padding: "0 18px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
+                {sheetLoading ? <Loader2 size={14} className="spin" /> : <ArrowRight size={14} />}{t.loadSheet}
+              </button>
+            </div>
+
+            {importErr && (
+              <div style={{ marginTop: 14, fontSize: 13, color: "#f87171", display: "flex", gap: 7, alignItems: "center" }}>
+                <AlertCircle size={15} />{importErr}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const sectionTitle = { fontSize: 14, fontWeight: 600, color: "#c9cdd6", margin: "0 0 16px", letterSpacing: "-.01em" };
+const tooltipStyle = { background: "#13151d", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, color: "#e6e7ec", fontSize: 12 };
+const btn = { display: "flex", alignItems: "center", gap: 7, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", color: "#e6e7ec", padding: "9px 14px", borderRadius: 11, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" };
+const segBtn = { background: "rgba(255,255,255,.04)", color: "#9aa0ad", border: "1px solid rgba(255,255,255,.08)", padding: "8px 16px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", transition: "all .2s" };
